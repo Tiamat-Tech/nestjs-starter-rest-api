@@ -31,7 +31,7 @@ One of our main principals has been to keep the starter kit as lightweight as po
 | Docker Ready             | Dockerfile         | Done     |
 | Devcontainer             | -                  | Done     |
 | Auto-generated OpenAPI   | -                  | Done     |
-| Auto-generated ChangeLog | -                  | WIP      |
+| Auto-generated ChangeLog | -                  | WIP.     |
 
 Apart from these features above, our start-kit comes loaded with a bunch of minor awesomeness like prettier integration, commit-linting husky hooks, package import sorting, SonarCloud github actions, docker-compose for database dependencies, etc. :D
 
