@@ -22,8 +22,6 @@ jobs:
         with:
           node-version: 20.19.6
           cache: 'npm'
-      # Downgrade to npm 9 to avoid "Exit handler never called" bug in npm 10
-      - run: npm install -g npm@9
       - run: npm ci
       - name: Run test cov
         run: npm run test:cov
