@@ -1,77 +1,55 @@
 # npm audit summary (post NestJS 11 migration)
 
-After upgrading to NestJS 11, `npm audit` initially reported **17 vulnerabilities**:
+After upgrading to NestJS 11, `npm audit` initially reported **17 vulnerabilities**. Step 1 (`npm audit fix`) cleared 9 with no code impact. Six newly-disclosed advisories then surfaced (mostly via a new `uuid` advisory), bringing the count back to 14. Step 2 removed `@compodoc/compodoc` outright, eliminating 9 dev-only advisories in one stroke.
 
-| Severity | Initial | After `npm audit fix` |
-|----------|---------|-----------------------|
-| Critical | 1 | 0 |
-| High | 8 | 4 |
-| Moderate | 7 | 4 |
-| Low | 1 | 0 |
-| **Total** | **17** | **8** |
+| Severity | Initial | After `npm audit fix` | After new disclosures | After compodoc removed |
+|----------|---------|-----------------------|-----------------------|------------------------|
+| Critical | 1 | 0 | 0 | 0 |
+| High | 8 | 4 | 4 | 3 |
+| Moderate | 7 | 4 | 10 | 2 |
+| Low | 1 | 0 | 0 | 0 |
+| **Total** | **17** | **8** | **14** | **5** |
 
-Step 1 (safe fixes) is complete — 9 vulnerabilities resolved with zero breaking changes, only `package-lock.json` touched. The remaining 8 all require breaking changes (see the "Breaking fixes" section below).
+The 5 remaining advisories are all **runtime** dependencies in two clusters: bcrypt's `tar` chain and the `uuid` advisory.
 
-This document categorizes them by **runtime impact** and lays out the safe fix path.
-
-## Vulnerabilities by runtime impact
-
-### Runtime (production) dependencies
-
-These ship with the built app and represent real attack surface:
+## Remaining vulnerabilities (all runtime)
 
 | Package | Severity | Issue | Fix | Status |
 |---------|----------|-------|-----|--------|
-| `qs` (<=6.14.1) | Moderate | `arrayLimit` bypass in comma + bracket parsing → DoS | `npm audit fix` (safe) | ✅ Done |
-| `undici` (7.0.0 – 7.23.0) | High | HTTP request/response smuggling, WebSocket crashes, unbounded decompression, CRLF injection | `npm audit fix` (safe) | ✅ Done |
-| `bcrypt` (5.0.1 – 5.1.1) → `@mapbox/node-pre-gyp` → `tar` (<=7.5.10) | High | Path traversal, symlink poisoning, hardlink escape in `tar` extraction | `bcrypt` 5 → 6 (breaking, dedicated PR) | ⏳ Pending |
+| `bcrypt` (5.0.1 – 5.1.1) → `@mapbox/node-pre-gyp` → `tar` (<=7.5.10) | High (×3) | Path traversal, symlink poisoning, hardlink escape, Unicode-ligature race in `tar` extraction (6 advisories collapsed into 3 packages) | `bcrypt` 5 → 6 (breaking, dedicated PR) | ⏳ Pending |
+| `uuid` (<14.0.0) | Moderate | Missing buffer bounds check in v3/v5/v6 when `buf` is provided (`GHSA-w5hq-g745-h8pq`) | `uuid` 10 → 14 (breaking) | ⏳ Pending |
+| `typeorm` (0.2.42-dev – 0.4.0-alpha.1) | Moderate | Bundles a vulnerable `uuid@11.1.0` transitively | Wait for upstream `typeorm` patch (current 0.3.28) | ⏳ Pending |
 
-### Dev-only dependencies
+## What was cleared
 
-These are consumed only during build/test/docs generation. No prod impact:
+### Step 1 — `npm audit fix` (safe)
 
-| Package | Severity | Enters via | Fix | Status |
-|---------|----------|-----------|-----|--------|
-| `handlebars` (4.0.0 – 4.7.8) | Critical | `@compodoc/compodoc` (docs generator) | ~~`npm audit fix --force`~~ — resolved by safe `npm audit fix` | ✅ Done |
-| `ajv` (<6.14.0 / 7.x–8.17.x) | Moderate | `@angular-devkit/core` → `@compodoc/compodoc`; also `eslint` | `npm audit fix --force` (compodoc downgrade) | ⏳ Pending |
-| `flatted` | High | `eslint`/`jest` internals | `npm audit fix` (safe) | ✅ Done |
-| `@isaacs/brace-expansion`, `brace-expansion` | High / Moderate | `eslint`, `jest`, `@mapbox/node-pre-gyp` | `npm audit fix` (safe) | ✅ Done |
-| `picomatch` | Various | `chokidar`, `jest`, `micromatch`, `@compodoc/live-server` | `npm audit fix --force` (compodoc downgrade) | ⏳ Pending |
-| `diff` | Low/Moderate | `jest-diff` | `npm audit fix` (safe) | ✅ Done |
-| `yaml` (2.0.0 – 2.8.2) | Moderate | Likely a config/docs tool | `npm audit fix` (safe) | ✅ Done |
+Cleared 9 of the original 17: `qs`, `undici`, `yaml`, `diff`, `flatted`, `brace-expansion` family, `@isaacs/brace-expansion`, `handlebars` (the lone critical), and one more in the eslint/jest internals chain.
 
-## Fix paths
+### Step 2 — remove `@compodoc/compodoc` (this PR)
 
-### Safe fixes (no breaking changes)
+`@compodoc/compodoc` is a dev-only API-docs generator. After NestJS 11, its transitive dependency tree accumulated 9 advisories with no clean upgrade path (downgrading was the only `npm audit fix --force` option, sacrificing features for a chain that's only used to render HTML docs). We removed it entirely.
 
-```bash
-npm audit fix
-```
+Cleared in this PR:
 
-Addresses: `qs`, `undici`, `yaml`, `diff`, `flatted`, `brace-expansion` family, `@isaacs/brace-expansion`. Expected to clear the majority of the 17 findings with no code impact.
+| Package | Severity | Why it was here |
+|---------|----------|-----------------|
+| `@compodoc/compodoc` | Moderate | direct dev dep |
+| `@compodoc/live-server` | Moderate | compodoc → live-server |
+| `http-auth` | Moderate | live-server → http-auth |
+| `vis-network`, `vis-data` | Moderate (×2) | compodoc graph rendering |
+| `@angular-devkit/core`, `@angular-devkit/schematics` | Moderate (×2) | compodoc schematics |
+| `ajv` | Moderate | angular-devkit → ajv |
+| `picomatch` | High | compodoc → picomatch |
 
-### Breaking fixes (require evaluation)
+If module-graph docs are needed in the future, `npx @compodoc/compodoc -p tsconfig.json` can be run as a one-off without a permanent dependency. Swagger UI ([@nestjs/swagger](../../package.json)) remains as the API documentation surface.
 
-```bash
-npm audit fix --force
-```
+## Next steps
 
-Would additionally apply:
-
-1. **`bcrypt` 5.x → 6.0.0** (runtime dep). This is used for password hashing in the auth service. A major bump needs dedicated testing:
-   - Existing hashed passwords must still verify (bcrypt hashes are forward-compatible, but confirm)
-   - Review [bcrypt 6 release notes](https://github.com/kelektiv/node.bcrypt.js/releases) for any API changes
-   - Full auth flow smoke test: register, login, password hash round-trip
-2. **`@compodoc/compodoc` 1.1.32 → 1.1.23** (dev-only, **downgrade**).
-   - **Current version:** `^1.1.32` (from `package.json`)
-   - **Target version:** `1.1.23` — this is what `npm audit fix --force` now suggests
-     - Note: before safe fixes ran, the target was `1.1.16` because `handlebars` (critical) was in the chain up through 1.1.23. The safe fix resolved `handlebars`, so the lowest safe compodoc version climbed to `1.1.23`.
-   - **Why downgrade?** compodoc `>=1.1.24` depends on `@angular-devkit/schematics` versions that transitively pull in vulnerable `ajv` (ReDoS) and `picomatch` (ReDoS). `1.1.23` is currently the newest version whose transitive deps don't trigger the audit.
-   - **Trade-off:** We lose bug fixes / features added in `1.1.24` through `1.1.32`. Since compodoc is dev-only (docs generation), that loss is low-impact.
-
-## Recommended rollout
-
-1. **Safe fixes first.** Run `npm audit fix`, run tests, open PR. Low risk. **✅ Done** — 9 of 17 resolved, build + tests pass.
-2. **bcrypt 6 separately.** Dedicated PR with auth flow regression testing. ⏳ Pending — clears the remaining 6 runtime (`tar` chain) advisories.
-
-After these two steps the audit report should be mostly clean, with remaining findings (if any) being acknowledged dev-only noise from the compodoc chain.
+1. **`bcrypt` 5 → 6** — dedicated PR. Major bump on a runtime auth dep:
+   - Verify existing hashed passwords still validate (bcrypt hashes are stable across the v5→v6 boundary, but smoke-test it).
+   - Review [bcrypt 6 release notes](https://github.com/kelektiv/node.bcrypt.js/releases) for API changes.
+   - Auth flow regression: register, login, password round-trip.
+   - Clears 3 of the 5 remaining advisories (bcrypt + tar chain).
+2. **`uuid` 10 → 14** — dedicated PR. Major bump; check call-sites that pass a `buf` argument or rely on v1/v3/v5/v6 generation. Clears 1 advisory. `typeorm`'s bundled `uuid` will remain flagged until upstream typeorm patches.
+3. **`typeorm`** — track upstream; no action on our side.
